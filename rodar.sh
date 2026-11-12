@@ -34,6 +34,12 @@ valores() {
 
 primeiro() { valores "$1" "$2" 1 | cut -f2; }
 
+# qtd <etapa> <dimensao> <valor>: quantas vezes aquele valor aparece no recorte
+qtd() { awk -F'\t' -v d="$2" -v v="$3" '$1 == d && $2 == v { print $3 }' "$(arq "$1")"; }
+
+# pct <parte> <total>: porcentagem com uma casa decimal
+pct() { awk -v a="$1" -v b="$2" 'BEGIN { printf "%.1f%%", 100 * a / b }'; }
+
 # tabela <etapa> <dimensao> <n> <titulo>: ranking com % sobre o total de titulos do recorte
 tabela() {
     echo "  $4"
@@ -121,7 +127,7 @@ echo "  Diretores (empate desfeito pelo total de titulos no catalogo inteiro):"
 diretores 4-pais 6 | awk -F'\t' '{ printf "    %2d. %-28s %2d no recorte, %2d no catalogo\n", NR, $3, $1, $2 }'
 tabela 4-pais elenco 10 "Elenco:"
 tabela 4-pais classificacao 4 "Classificacao indicativa:"
-IFS=$'\t' read -r MEDIANA MEDIA _ < <(estatisticas 4-pais duracao_min)
+IFS=$'\t' read -r MEDIANA MEDIA N_DURACAO < <(estatisticas 4-pais duracao_min)
 echo "  Duracao: mediana ${MEDIANA} min, media ${MEDIA} min"
 tabela 4-pais mes_adicao 3 "Mes em que mais entram titulos:"
 echo "  Palavras mais frequentes nas descricoes (sem stopwords):"
@@ -129,14 +135,36 @@ valores 4-pais palavra 15 | awk -F'\t' '{ printf "    %2d. %-14s %4d ocorrencias
 
 echo
 echo "================================ FICHA SUGERIDA PELOS DADOS ================================"
+T1=$(total_titulos 1-catalogo); T2=$(total_titulos 2-tipo); T3=$(total_titulos 3-generos); T4=$(total_titulos 4-pais)
+QTD_TIPO=$(qtd 1-catalogo tipo "$TIPO")
+QTD_PAIS=$(qtd 3-generos pais "$PAIS")
+CLASSIFICACAO=$(primeiro 4-pais classificacao); QTD_CLASSIFICACAO=$(qtd 4-pais classificacao "$CLASSIFICACAO")
+MES=$(primeiro 4-pais mes_adicao); QTD_MES=$(qtd 4-pais mes_adicao "$MES")
+IFS=$'\t' read -r DIR_RECORTE DIR_CATALOGO DIRETOR < <(diretores 4-pais 1)
+EMPATADOS=$(valores 4-pais diretor 100000 | awk -F'\t' -v m="$DIR_RECORTE" '$1 == m' | wc -l | tr -d ' ')
+
 echo "  Tipo:           $TIPO"
+echo "                  -> $QTD_TIPO de $T1 titulos do catalogo ($(pct "$QTD_TIPO" "$T1")), o tipo mais frequente"
 echo "  Genero:         $GENEROS"
+echo "                  -> os 2 generos mais frequentes entre os $T2 titulos do tipo $TIPO:"
+valores 2-tipo genero 2 | awk -F'\t' -v t="$T2" '{ printf "                     %s: %d (%.1f%%)\n", $2, $1, 100 * $1 / t }'
 echo "  Pais:           $PAIS"
-echo "  Duracao:        ${MEDIANA} min (mediana do recorte)"
-echo "  Classificacao:  $(primeiro 4-pais classificacao)"
-echo "  Diretor:        $(diretores 4-pais 1 | cut -f3)"
+echo "                  -> $QTD_PAIS dos $T3 titulos com ${GENEROS//,/ + } ($(pct "$QTD_PAIS" "$T3")), o pais mais frequente"
+echo "  Duracao:        ${MEDIANA} min"
+echo "                  -> mediana dos $N_DURACAO titulos do recorte (media ${MEDIA} min); no tipo $TIPO inteiro a mediana e ${MED_T2} min"
+echo "  Classificacao:  $CLASSIFICACAO"
+echo "                  -> $QTD_CLASSIFICACAO dos $T4 titulos do recorte ($(pct "$QTD_CLASSIFICACAO" "$T4")), a mais frequente"
+echo "  Diretor:        $DIRETOR"
+if [ "$EMPATADOS" -gt 1 ]; then
+    echo "                  -> $DIR_RECORTE titulos no recorte, empatado com outros $((EMPATADOS - 1)); desempate: $DIR_CATALOGO titulos no catalogo inteiro"
+else
+    echo "                  -> o que mais aparece no recorte: $DIR_RECORTE titulos"
+fi
 echo "  Elenco:         $(valores 4-pais elenco 5 | cut -f2 | paste -sd, - | sed 's/,/, /g')"
-echo "  Lancamento:     $(primeiro 4-pais mes_adicao)"
+echo "                  -> os 5 que mais aparecem nos $T4 titulos do recorte: $(valores 4-pais elenco 5 | cut -f1 | paste -sd, - | sed 's/,/, /g') titulos"
+echo "  Lancamento:     $MES"
+echo "                  -> mes em que mais entram titulos do recorte: $QTD_MES de $T4 ($(pct "$QTD_MES" "$T4"))"
 echo "  Temas:          $(valores 4-pais palavra 10 | cut -f2 | paste -sd, - | sed 's/,/, /g')"
+echo "                  -> as 10 palavras mais frequentes nas descricoes do recorte: $(valores 4-pais palavra 10 | cut -f1 | paste -sd, - | sed 's/,/, /g') ocorrencias"
 echo "============================================================================================="
 } | tee saida/analise.txt
